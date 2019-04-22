@@ -8,7 +8,8 @@ import vgg
 import keras.backend as K
 import keras.layers as kl
 import keras.models as km
-
+import os
+import sys
 
 def content_layer_loss(Fp, Fx):
     # ! Change me
@@ -31,6 +32,17 @@ def style_layer_loss(Fa, Fx):
     loss = 0
     return loss
 
+on_gpu_server = True
+if (on_gpu_server == True):
+    sys.path.append("./libs/GPUtil/GPUtil")
+    import GPUtil
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    gpus = GPUtil.getAvailable(order="first",limit=1,maxLoad=.2,maxMemory=.2)
+    if(len(gpus) > 0):
+        os.environ["CUDA_VISIBLE_DEVICES"]=str(gpus[0])
+    else:
+        print("No free GPU")
+        sys.exit()
 
 content_path = './main_hall.jpg'
 style_path = './starry_night.jpg'
