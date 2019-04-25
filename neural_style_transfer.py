@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
-
+#import os
+#os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 import keras.preprocessing as kp
 import matplotlib.pyplot as plt
 import numpy as np
@@ -221,34 +222,43 @@ class LossWrapper:
     def loss(self, x):
         x = x.reshape((1, img_rows, img_cols, 3))
         self.l0, self.g0 = loss_and_grad_evaluator([x])
-        print(self.l0.shape, self.g0.shape, self.l0[0])
-        return self.l0[0]
+        return self.l0[0].astype(np.float64)
 
     def grad(self, x):
-        print('hi', self.g0.ravel().shape)
-        return self.g0.ravel()
+        return np.asarray(self.g0.ravel().astype(np.float64))
 
-lr = 0.00001
-import time
-start = int(time.time())
-for i in range(100000):
-    l0, g0 = loss_and_grad_evaluator([input_img])
-    if(np.isnan(l0[0])):
-        break
-    input_img -= lr*g0
-    print("Loss: {}. Step: {}. tps: {}".format(l0[0], i, (int(time.time()) - start)/i))
-    if (i+1) % 100 == 0:
-        plt.imshow(input_img[0])
-        plt.savefig('{}_{}.png'.format(l0[0], i))
-        plt.show()
-
+# lr = 0.0001
+# import time
+# start = int(time.time())
+# for i in range(100000):
+#     l0, g0 = loss_and_grad_evaluator([input_img])
+#     if(np.isnan(l0[0])):
+#         break
+#     input_img -= lr*g0
+#     if (i+1) % 10 == 0:
+#         print("Loss: {}. Step: {}. tps: {}".format(l0[0], i, (int(time.time()) - start)/i))
+#     if (i+1) % 1000 == 0:
+#         plt.figure()
+#         plt.imshow(input_img[0])
+#         plt.savefig('{}_{}.png'.format(l0[0], i))
+#         plt.close()
 
 # We can now evaluate the loss and gradient for an arbitrary image input.  All that's left is to solve the minimization problem.  The authors of the original neural style transfer paper use l_bfgs.  There is a convenient implementation of this algorithm in scipy
 # NOTE: I can't get lbfgs to work.
-# ,import scipy.optimize as sio
-# ,grad_evaluator = K.function([blend_model.input], [grads])
-# ,
-# ,lw = LossWrapper(input_img)
-# ,# print(input_img.shape)
-# ,# print(input_img.ravel().shape)
-# ,sio.fmin_l_bfgs_b(lw.loss, input_img.ravel(), lw.grad)
+import scipy.optimize as sio
+
+print(input_img.dtype)
+
+grad_evaluator = K.function([blend_model.input], [grads])
+lw = LossWrapper(input_img)
+x, f, d = sio.fmin_l_bfgs_b(func=lw.loss, x0=input_img.ravel(), fprime=lw.grad)
+
+try:
+    plt.imshow(x.reshape((img_rows, img_cols, 3)))
+
+except Exception as e:
+    print(e)
+    plt.imshow(x[0])
+
+plt.savefig("lbfgs.png")
+plt.show()
