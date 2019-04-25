@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 # coding: utf-8
-#import os
-#os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 import keras.preprocessing as kp
 import matplotlib.pyplot as plt
 import numpy as np
@@ -227,6 +225,7 @@ class LossWrapper:
     def grad(self, x):
         return np.asarray(self.g0.ravel().astype(np.float64))
 
+# Slow gradient descent.
 # lr = 0.0001
 # import time
 # start = int(time.time())
@@ -247,18 +246,13 @@ class LossWrapper:
 # NOTE: I can't get lbfgs to work.
 import scipy.optimize as sio
 
-print(input_img.dtype)
-
 grad_evaluator = K.function([blend_model.input], [grads])
 lw = LossWrapper(input_img)
-x, f, d = sio.fmin_l_bfgs_b(func=lw.loss, x0=input_img.ravel(), fprime=lw.grad)
-
-try:
-    plt.imshow(x.reshape((img_rows, img_cols, 3)))
-
-except Exception as e:
-    print(e)
-    plt.imshow(x[0])
-
-plt.savefig("lbfgs.png")
+x, f, d = sio.fmin_l_bfgs_b(func=lw.loss, x0=input_img.ravel(), fprime=lw.grad, maxiter=500)
+x = x.reshape((img_rows, img_cols, 3))
+x[:, :, 0] += 103.939
+x[:, :, 1] += 116.779
+x[:, :, 2] += 123.68
+plt.imshow(x.astype(np.int32))
+plt.savefig("lfbgs_mean_added.png")
 plt.show()
