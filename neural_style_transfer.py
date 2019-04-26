@@ -1,6 +1,7 @@
 # Project 5: Neural Style Transfer
 # Due May 2nd
 
+from Evaluator import *
 import keras.preprocessing as kp
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,57 +17,79 @@ def content_layer_loss(Fp, Fx):
 
     _, h, w, d = Fp.get_shape().as_list()
 
-    # Compute the residuals
-    res = Fx - Fp
-
-    # Square the residuals
-    sq_res = res**2
-
-    # Compute sum of residual squares
-    sum_sq_res = K.tf.reduce_sum(sq_res)
+    # Compute sum of residual squares (sse)
+    sse = K.tf.reduce_sum((Fx - Fp)**2)
 
     # Note: to access underlying value: w.value
     M = w * h
     N = d
+
+    # Compute scaling factor
     scale = 1.0 / (2 * (M**0.5) * (N**0.5))
 
-    loss = sum_sq_res * scale
+    loss = scale * sse
 
     return loss
 
 
 def gram_matrix(f):
 
+    # Accepts a (height,width,depth)-sized feature map,
+    # reshapes to (M,N), then computes the inner product
+
     _, h, w, d = f.get_shape().as_list()
 
     M = h * w
     N = d
 
-    # Accepts a (height,width,depth)-sized feature map,
-    # reshapes to (M,N), then computes the inner product
     f = K.tf.reshape(f, shape=(M, N))
 
     return K.tf.tensordot(K.tf.transpose(f), f, 1)
 
 
 def style_layer_loss(Fa, Fx):
-    # ! Change me
+
     _, h, w, d = Fa.get_shape().as_list()
 
+    # Calculate gram matrix of respective feature maps
     G_Fa = gram_matrix(Fa)
     G_Fx = gram_matrix(Fx)
 
-    res = G_Fa - G_Fx
-    sq_res = res**2
-    sum_sq_res = K.tf.reduce_sum(sq_res)
+    # Compute sse between gram matrices
+    sse = K.tf.reduce_sum((G_Fa - G_Fx)**2)
 
+    # Compute scaling factor
     M = w * h
     N = d
     scale = 1 / (4 * M**2 * N**2)
 
-    loss = scale * sum_sq_res
+    loss = scale * sse
 
     return loss
+
+
+def create_model(input_img, output_layers):
+
+    # Instantiate full VGG model w/ input img
+    base_model = vgg.VGG19(input_tensor=kl.Input(tensor=K.tf.Variable(input_img)))
+    return km.Model(inputs=base_model.inputs, outputs=[base_model.get_layer(n).output for n in output_layers])
+
+
+def pixel_means(img, add=False):
+
+    if add:
+
+        img[:, :, 0] += 103.939
+        img[:, :, 1] += 116.779
+        img[:, :, 2] += 123.68
+
+    else:
+
+        img[:, :, 0] -= 103.939
+        img[:, :, 1] -= 116.779
+        img[:, :, 2] -= 123.68
+
+    return img
 
 
 on_gpu_server = False
@@ -76,12 +99,13 @@ if on_gpu_server is True:
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     gpus = GPUtil.getAvailable(order="first", limit=1, maxLoad=.2, maxMemory=.2)
-    if (len(gpus) > 0):
+    if len(gpus) > 0:
         os.environ["CUDA_VISIBLE_DEVICES"] = str(gpus[0])
     else:
         print("No free GPU")
-        sys.exit()
+        sys.exit(1)
 
+# Get image paths
 content_path = './main_hall.jpg'
 style_path = './starry_night.jpg'
 
@@ -104,61 +128,26 @@ style_img = kp.image.img_to_array(style_img)
 # Subtract mean pixel value of
 # dataset used to train vgg19
 # from both content and style image
-content_img[:, :, 0] -= 103.939
-content_img[:, :, 1] -= 116.779
-content_img[:, :, 2] -= 123.68
-content_img = np.expand_dims(content_img, axis=0)
-
-style_img[:, :, 0] -= 103.939
-style_img[:, :, 1] -= 116.779
-style_img[:, :, 2] -= 123.68
-style_img = np.expand_dims(style_img, axis=0)
-
-# Instantiate content model w/ content img
-content_base_model = vgg.VGG19(input_tensor=kl.Input(tensor=K.tf.Variable(content_img)))
-
-# evaluator = K.function([content_base_model.input], [content_base_model.output])
-# feature_maps = evaluator([content_img])
-# plt.imshow(feature_maps[0][0, :, :, 500])
-# plt.show()
+content_img = np.expand_dims(pixel_means(content_img), axis=0)
+style_img = np.expand_dims(pixel_means(style_img), axis=0)
 
 # Define the layer outputs that we are interested in
 content_layers = ['block4_conv2']
 
-# Get the tensor outputs of those layers
-content_outputs = [content_base_model.get_layer(n).output for n in content_layers]
+# Create content model
+content_model = create_model(content_img, content_layers)
 
-# Instantiate a new model with those outputs as outputs
-content_model = km.Model(inputs=content_base_model.inputs,
-                         outputs=content_outputs)
-
-# This is not used any further, it's just for visualizing the features
-# evaluator = K.function([content_model.input], [content_model.output])
-# feature_maps = evaluator([content_img])
-# plt.imshow(feature_maps[0][0, :, :, 125])
-# plt.show()
-
-# Please call this second network 'style_model'
-
-# Instantiate full style model w/ style img
-style_base_model = vgg.VGG19(input_tensor=kl.Input(tensor=K.tf.Variable(style_img)))
-
-# Define the layer outputs that we are interested in
+# Create style model
 style_layers = ['block1_relu1', 'block2_relu1', 'block3_relu1', 'block4_relu1', 'block5_relu1']
+style_model = create_model(style_img, style_layers)
 
-style_outputs = [style_base_model.get_layer(n).output for n in style_layers]
-
-style_model = km.Model(inputs=style_base_model.inputs,
-                       outputs=[style_base_model.get_layer(n).output for n in style_layers])
-
-# Instantiate blend style model
+# Instantiate blend model
 # Note that the blend model input is same shape/size as content image
 blend_base_model = vgg.VGG19(input_tensor=kl.Input(shape=content_img.shape[1:]))
 
 # blend_outputs = content_outputs + style_outputs
 blend_outputs = [blend_base_model.get_layer(n).output for n in content_layers] + [blend_base_model.get_layer(n).output for n in style_layers]
 
-# ! Change me
 blend_model = km.Model(inputs=blend_base_model.inputs, outputs=blend_outputs)
 
 # Separate the model outputs into those intended for comparison with the content layer and the style layer
@@ -167,38 +156,48 @@ blend_style_outputs = blend_model.outputs[1:]
 
 content_loss = content_layer_loss(content_model.output, blend_content_outputs[0])
 
-# The correct output of this function is 195710720.0
-np.random.seed(0)
-input_img = np.random.randn(1, img_rows, img_cols, 3)
 content_loss_evaluator = K.function([blend_model.input], [content_loss])
-content_loss_evaluator([input_img])
-print("Content loss:", content_loss_evaluator([input_img]))
 
 # For a correctly implemented gram_matrix, the following code will produce 113934860.0
 fmap = content_model.output
 
 gram_matrix_evaluator = K.function([content_model.input], [gram_matrix(fmap)])
-print("Gram matrix mean:", gram_matrix_evaluator([content_img])[0].mean())
-
-style_loss_0 = style_layer_loss(style_model.output[0],blend_style_outputs[0])
-
-# The correct output of this function is 220990.31
-np.random.seed(0)
-input_img = np.random.randn(1, img_rows, img_cols, 3)
-style_loss_evaluator = K.function([blend_model.input], [style_loss_0])
-print("Single layer style loss:", style_loss_evaluator([input_img]))
 
 style_loss = 0
 for i in range(5):
     style_loss += 0.2 * style_layer_loss(style_model.output[i], blend_style_outputs[i])
 
-# The correct output of this function is 177059700.0
-np.random.seed(0)
-input_img = np.random.randn(1, img_rows, img_cols, 3)
 style_loss_evaluator = K.function([blend_model.input], [style_loss])
-print("All layer style loss:", style_loss_evaluator([input_img]))
 
-## All code up to this point works ##
+tv_loss = K.tf.image.total_variation(blend_model.input)
 
+# Note: these parameters are arbitrarily chosen
+alpha = 5.0
+beta = 1e4
+gamma = 1e-3
 
+# Calculate total loss as a paramterized lc of content loss, style loss, and total variation loss
+total_loss = alpha * content_loss + beta * style_loss + gamma * tv_loss
 
+# Create total loss evaluator
+total_loss_evaluator = K.function([blend_model.input], [total_loss])
+
+# Create loss and gradient evaluator.
+# Note that tensorflow performs automatic symbolic
+# differentiation on the given inputs
+grads = K.gradients(total_loss, blend_model.input)[0]
+loss_and_grad_evaluator = K.function([blend_model.input], [total_loss, grads])
+
+# Generate random data and perform optimization
+input_img = np.random.randn(1, img_rows, img_cols, 3)
+my_evaluator = Evaluator(loss_and_grad_evaluator)
+blend_img = my_evaluator.optimize(input_img, img_rows, img_cols)
+
+# Once optimization is complete,
+# re-add band means we subtracted earlier,
+# cast to integer, clip values greater than 255
+blend_img = pixel_means(blend_img).astype(np.int32)
+
+# Display and save image.
+plt.imshow(blend_img)
+plt.show()
