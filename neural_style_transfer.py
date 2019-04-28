@@ -8,61 +8,8 @@ import keras.layers as kl
 import keras.models as km
 import tensorflow as tf
 
+import scipy.misc
 import scipy.optimize as sio
-
-def content_layer_loss(Fp, Fx):
-    #! Change me
-    _,h,w,d = Fp.get_shape().as_list()
-    constant = 1/(2*(w*h)**.5*d**.5)
-    suum = tf.reduce_sum(np.sum((Fx[0,:,:,l] - Fp[0,:,:,l])**2 for l in range(0, d)))
-    loss = constant*suum
-    return loss
-
-def gram_matrix(f, M, N):
-     # Accepts a (height,width,depth)-sized feature map,
-     # reshapes to (M,N), then computes the inner product
-     reshaped_f = kl.Reshape((M, N))(f)[0]
-     reshaped_f_t = K.transpose(reshaped_f)
-     gram_matrix = K.dot(reshaped_f_t, reshaped_f) 
-     # !Change me
-     return gram_matrix
-
-def style_layer_loss(Fa, Fx):
-    #! Change me
-    _, h, w, d = Fa.get_shape().as_list()
-    M = h * w
-    N = d
-    constant = 1/(4*M**2*N**2)
-    suum = tf.reduce_sum((gram_matrix(Fa, M, N) - gram_matrix(Fx, M, N))**2)
-    loss = constant*suum  
-    return loss
-
-def total_loss(model_input):
-  tv_loss = K.tf.image.total_variation(blend_model.input)
-  alpha = 5.0
-  beta = 2e3
-  gamma = 1e-3
-  total_loss = alpha*content_loss + beta*style_loss + gamma*tv_loss
-  return total_loss
-
-class NeuralStyleTransfer:
-
-  def __init__(self, blend_model_input):
-     self._g = None
-     self._blend_model_input = blend_model_input
-
-  def loss_and_grad_eval(self, input_img, width, height):
-    input_img = input_img.reshape(1, width, height, 3)
-    total_loss_val = total_loss(self._blend_model_input)
-    grads = K.gradients(total_loss_val,self._blend_model_input)[0]
-  
-    loss_and_grad_evaluator = K.function([self._blend_model_input],[total_loss_val,grads])
-    l,self._g = loss_and_grad_evaluator([input_img])
-    self._g = self._g.flatten().astype('float64')
-    return l.astype('float64') 
-
-  def gradient(self, input_img, width, height):
-    return self._g
 
 content_path = './main_hall.jpg'
 style_path = './starry_night.jpg'
@@ -148,64 +95,69 @@ blend_model = km.Model(inputs=blend_base_model.inputs,outputs=[blend_base_model.
 blend_content_outputs = [blend_model.outputs[0]]
 blend_style_outputs = blend_model.outputs[1:]
 
+def content_layer_loss(Fp, Fx):
+  #! Change me
+  _,h,w,d = Fp.get_shape().as_list()
+  constant = 1/(2*(w*h)**.5*d**.5)
+  suum = tf.reduce_sum(np.sum((Fx[0,:,:,l] - Fp[0,:,:,l])**2 for l in range(0, d)))
+  loss = constant*suum
+  return loss
+
 content_loss = content_layer_loss(content_model.output,blend_content_outputs[0])
 
-# The correct output of this function is 195710720.0
-# np.random.seed(0)
-# input_img = np.random.randn(1,img_rows,img_cols,3)
-# content_loss_evaluator = K.function([blend_model.input],[content_loss])
-# print(content_loss_evaluator([input_img]))
+def gram_matrix(f, M, N):
+  # Accepts a (height,width,depth)-sized feature map,
+  # reshapes to (M,N), then computes the inner product
+  reshaped_f = kl.Reshape((M, N))(f)[0]
+  reshaped_f_t = K.transpose(reshaped_f)
+  gram_matrix = K.dot(reshaped_f_t, reshaped_f) 
+  # !Change me
+  return gram_matrix
 
-# For a correctly implemented gram_matrix, the following code will produce 113934860.0
-# fmap = content_model.output
-# _,h,w,d = fmap.get_shape()
-# M = h*w
-# N = d
-# gram_matrix_evaluator = K.function([content_model.input],[gram_matrix(fmap,M,N)])
-# print(gram_matrix_evaluator([content_img])[0].mean())
-
-# style_loss_0 = style_layer_loss(style_model.output[0],blend_style_outputs[0])
-
-# The correct output of this function is 220990.31
-# np.random.seed(0)
-# input_img = np.random.randn(1,img_rows,img_cols,3)
-# content_loss_evaluator = K.function([blend_model.input],[style_loss_0])
-# print(content_loss_evaluator([input_img]))
+def style_layer_loss(Fa, Fx):
+  #! Change me
+  _, h, w, d = Fa.get_shape().as_list()
+  M = h * w
+  N = d
+  constant = 1/(4*M**2*N**2)
+  suum = tf.reduce_sum((gram_matrix(Fa, M, N) - gram_matrix(Fx, M, N))**2)
+  loss = constant*suum  
+  return loss
 
 style_loss = 0
 for i in range(5):
     style_loss += 0.2*style_layer_loss(style_model.output[i],blend_style_outputs[i])
     
-# The correct output of this function is 177059700.0
-# np.random.seed(0)
-# input_img = np.random.randn(1,img_rows,img_cols,3)
-# style_loss_evaluator = K.function([blend_model.input],[style_loss])
-# print (style_loss_evaluator([input_img]))
+tv_loss = K.tf.image.total_variation(blend_model.input)
+alpha = 5.0
+beta = 2e3
+gamma = 1e-3
+total_loss = alpha*content_loss + beta*style_loss + gamma*tv_loss
 
-# tv_loss = K.tf.image.total_variation(blend_model.input)
+grads = K.gradients(total_loss,blend_model.input)[0]
 
-# alpha = 5.0
-# beta = 2e3
-# gamma = 1e-3
+loss_and_grad_evaluator = K.function([blend_model.input],[total_loss,grads])
 
-# total_loss = alpha*content_loss + beta*style_loss + gamma*tv_loss
-    
-# The correct output of this function is 1.7715756e+12
-# np.random.seed(0)
-# input_img = np.random.randn(1,img_rows,img_cols,3)
-# total_loss_evaluator = K.function([blend_model.input],[total_loss])
-# print (total_loss_evaluator([input_img]))
+global g
 
-# grads = K.gradients(total_loss,blend_model.input)[0]
+def loss_and_grad_eval(input_img, width, height):
+  global g  
+  input_img = input_img.reshape(1, width, height, 3)
 
-# loss_and_grad_evaluator = K.function([blend_model.input],[total_loss,grads])
+  l, g = loss_and_grad_evaluator([input_img])
+  g = g.flatten().astype('float64')
+  return l.astype('float64') 
 
-# np.random.seed(0)
-# input_img = np.random.randn(1,img_rows,img_cols,3)
-# l0,g0 = loss_and_grad_evaluator([input_img])
-# Correct value of l0 is 3.5509e11
-# Correct value of first element in g0 is -7.28989e2
+def gradient(input_img, width, height):
+  global g
+  return g
 
-neddy = NeuralStyleTransfer(blend_model.input)
+output_img, f, d = sio.fmin_l_bfgs_b(loss_and_grad_eval, content_img.flatten(), fprime=gradient, args=(content_img.shape[1], content_img.shape[2]), iprint=10, maxfun=500)
 
-sio.fmin_l_bfgs_b(neddy.loss_and_grad_eval, content_img.flatten(), fprime=neddy.gradient, args=(content_img.shape[1], content_img.shape[2]), iprint=10)
+output_img = np.reshape(output_img, (img_rows, img_cols, 3))
+output_img[:, :, 0] += 103.939
+output_img[:, :, 1] += 116.779
+output_img[:, :, 2] += 123.68
+#plt.imshow(output_img.astype(int))
+#plt.show()
+scipy.misc.imsave('outfile.jpg', output_img)
